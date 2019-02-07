@@ -1,0 +1,454 @@
+ With Temp_DS(DATA_SET_ID,LEN) 
+ as 
+ (SELECT DATA_SET_ID, 
+    LENGTH(DATA_SET_ID) LEN 
+  FROM RRMETADATA.RR_DATA_SET 
+ select 
+/*+parallel(6)*/ 
+product, 
+dataset_id, 
+qm_account 
+,QM_NONQM, 
+BU, 
+cycle, 
+max(Updated_at), 
+CPPP_IND,DESCRIPTION, 
+LEGAL_DOMICILE, 
+TSY_REGION, 
+LVID, 
+max(Orig_amount), 
+max(orig1), 
+max(orig2), 
+max(orig3), 
+max(orig4), 
+(case when  cycle1 = last_cyc  then count(distinct last_qm||last_bu) else null end) last_cyc_cnt, 
+(case when cycle = 'Current Cycle' then count(distinct con_qm||con_bu) else null end) as Count_BUQM, 
+case when max(max_orig_amt) = 0 then RANK() OVER (PARTITION BY QM_ACCOUNT, BU ORDER BY cycle1  desc ) -1  else 
+RANK() OVER (PARTITION BY QM_ACCOUNT, BU ORDER BY (case when max(orig4) >= 10000 then cycle1 else null end) ASC ) -1 end   AS latest_flg, 
+cycle1, 
+last_cyc 
+from ( 
+ SELECT 
+ALL_CYC.DATA_SET_ID dataset_id, 
+ALL_CYC.LVL_ONE_MTRC_ID qm_account, 
+CTTL.LVL_ONE_MTRC_ID con_qm, 
+CTTL.FRS_BU con_bu, 
+last_cyc.LVL_ONE_MTRC_ID last_qm, 
+last_cyc.FRS_BU last_bu , 
+last_cyc.last_cyc last_cyc, 
+bal.max_orig_amt max_orig_amt, ALL_CYC.CYCLE cycle1, 
+RR_SEC_BU_OPR_AL1.BUSINESS_UNIT, 
+RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_DESCRIPTION product, 
+CASE WHEN ALL_CYC.LVL_ONE_MTRC_ID LIKE 'QM%' THEN 'QM' ELSE 'NON-QM' END QM_NONQM, 
+RR_FRS_BUSINESS_UNIT_SY.BUSINESS_UNIT BU, 
+case when ALL_CYC.cycle = '0' then 'Current Cycle' else 'Prior Cycle'|| ' ' ||ALL_CYC.cycle end cycle, 
+ALL_CYC.UPDATED_AT Updated_at, 
+  ALL_CYC.CPPP_IND CPPP_IND, 
+  RR_CONFIGURED_QMEMO.DESCRIPTION DESCRIPTION, 
+  RREPORTING.RR_FRS_BU_HIER.LEGAL_DOMICILE LEGAL_DOMICILE, 
+  RREPORTING.RR_FRS_BU_HIER.TSY_REGION TSY_REGION, 
+  RREPORTING.RR_FRS_BU_HIER.LVID LVID, 
+   NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),0) Orig_amount, 
+  CASE WHEN 
+                       CASE WHEN F_OCC.LVL_ONE_MTRC_ID IS NOT NULL 
+                                THEN  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),999999.999) 
+                                ELSE  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),999999.999)  END 
+                                         <> LEAD(CASE WHEN F_OCC.LVL_ONE_MTRC_ID IS NOT NULL THEN  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),999999.999) 
+                                              ELSE  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),999999.999)   END,1,0) 
+                                                               OVER (PARTITION BY   ALL_CYC.LVL_ONE_MTRC_ID, ALL_CYC.FRS_BU ORDER BY  ALL_CYC.LVL_ONE_MTRC_ID,ALL_CYC.FRS_BU, CYCLE ) 
+                      THEN 1 ELSE 0 END orig1 
+, 
+  LEAD(CASE WHEN F_OCC.LVL_ONE_MTRC_ID IS NOT NULL THEN  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),999999.999) 
+                             ELSE  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),0)  END ,1,0) 
+                             OVER (PARTITION BY   ALL_CYC.LVL_ONE_MTRC_ID, ALL_CYC.FRS_BU ORDER BY  ALL_CYC.LVL_ONE_MTRC_ID,ALL_CYC.FRS_BU , CYCLE) orig2, 
+   ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT) orig3, 
+  CASE WHEN 
+                         CASE WHEN F_OCC.LVL_ONE_MTRC_ID IS NOT NULL 
+                                THEN  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),999999.999) 
+                                ELSE  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),0)  END 
+                                         <> LEAD(CASE WHEN F_OCC.LVL_ONE_MTRC_ID IS NOT NULL THEN  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),999999.999) 
+                                              ELSE  NVL( ROUND(ALL_CYC.LVL_ONE_MTRC_ORIG_AMT),0)  END,1,0) 
+                                                               OVER (PARTITION BY   ALL_CYC.LVL_ONE_MTRC_ID, ALL_CYC.FRS_BU ORDER BY  ALL_CYC.LVL_ONE_MTRC_ID,ALL_CYC.FRS_BU , CYCLE) 
+                         THEN CYCLE+10000 ELSE CYCLE  END orig4 
+  FROM 
+  RREPORTING.RR_SEC_BU_OPR  RR_SEC_BU_OPR_AL1, 
+  RRMETADATA.RR_CONTRACT_TYPE, 
+  ( 
+  SELECT ALL_CYC.DATA_SET_ID , 
+  ALL_CYC.FRS_BU, 
+  ALL_CYC.LVL_ONE_MTRC_ID, 
+  ALL_CYC.CYCLE , 
+  ALL_CYC.CONTRACT_TYPE_ID, 
+  ALL_CYC.LVL_ONE_MTRC_ORIG_AMT, 
+  ALL_CYC.UPDATED_AT, 
+  ALL_CYC.CPPP_IND 
+FROM 
+  (SELECT DS.DATA_SET_ID , 
+    CYCLE , 
+    DS.CONTRACT_TYPE_ID, 
+    DS.FRS_BU, 
+    DS.LVL_ONE_MTRC_ID, 
+    LVL_ONE_MTRC_ORIG_AMT, 
+    DS.UPDATED_AT, 
+    DS.CPPP_IND 
+  FROM RREPORTING.RR_MTRC_VALUE_LVL_ONE_CON, 
+    ( SELECT DISTINCT DATA_SET_ID, 
+      CYCLE, 
+      CPPP_IND, 
+      UPDATED_AT, 
+      CONTRACT_TYPE_ID, 
+      LVL_ONE_MTRC_ID, 
+      FRS_BU 
+    FROM 
+      (SELECT LVL_ONE_MTRC_ID, 
+        FRS_BU, 
+        CONTRACT_TYPE_ID 
+      FROM RREPORTING.RR_MTRC_VALUE_LVL_ONE_CON con 
+  INNER JOIN 
+Temp_DS 
+ON SUBSTR(con.DATA_SET_ID,1,Temp_DS.LEN) = Temp_DS.DATA_SET_ID 
+      WHERE 
+    CONTRACT_TYPE_ID in (SELECT CONTRACT_TYPE_ID 
+                                FROM RRMETADATA.RR_CONTRACT_TYPE 
+                             WHERE RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_DESCRIPTION in ('Cash & Due')) 
+      ), 
+      (SELECT con.DATA_SET_ID, 
+        MAX(UPDATED_AT) UPDATED_AT , 
+        'Current' CPPP_IND, 
+        RANK() OVER (ORDER BY MAX(UPDATED_AT) DESC ) -1 AS CYCLE 
+      FROM RREPORTING.RR_MTRC_VALUE_LVL_ONE_CON con 
+  INNER JOIN 
+Temp_DS 
+ON SUBSTR(con.DATA_SET_ID,1,Temp_DS.LEN) = Temp_DS.DATA_SET_ID 
+      WHERE CONTRACT_TYPE_ID in (SELECT CONTRACT_TYPE_ID 
+                                FROM RRMETADATA.RR_CONTRACT_TYPE 
+                           WHERE RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_DESCRIPTION in ('Cash & Due')) 
+      
+        
+      GROUP BY con.DATA_SET_ID 
+      ) 
+    ) DS 
+  WHERE DS.DATA_SET_ID    = RR_MTRC_VALUE_LVL_ONE_CON.DATA_SET_ID(+) 
+  AND DS.CONTRACT_TYPE_ID = RR_MTRC_VALUE_LVL_ONE_CON.CONTRACT_TYPE_ID(+) 
+  AND DS.FRS_BU           = RR_MTRC_VALUE_LVL_ONE_CON.FRS_BU(+) 
+  AND DS.LVL_ONE_MTRC_ID  = RR_MTRC_VALUE_LVL_ONE_CON.LVL_ONE_MTRC_ID(+) 
+  ORDER BY LVL_ONE_MTRC_ID , 
+    FRS_BU , 
+    CYCLE 
+  ) ALL_CYC 
+  )  ALL_CYC, 
+  RR_FRS_BUSINESS_UNIT_SY, 
+  ( 
+   SELECT LVL_ONE_MTRC_ID 
+                     , FRS_BU 
+                     , CONTRACT_TYPE_ID 
+                     , SUM( ROUND(LVL_ONE_MTRC_ORIG_AMT)) as amount 
+                                 FROM RREPORTING.RR_MTRC_VALUE_LVL_ONE_CON con 
+INNER JOIN 
+Temp_DS 
+ON SUBSTR(con.DATA_SET_ID,1,Temp_DS.LEN) = Temp_DS.DATA_SET_ID 
+                      WHERE CONTRACT_TYPE_ID in (SELECT CONTRACT_TYPE_ID 
+                                FROM RRMETADATA.RR_CONTRACT_TYPE 
+                            WHERE RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_DESCRIPTION in ('Cash & Due')) 
+           GROUP BY LVL_ONE_MTRC_ID, FRS_BU, CONTRACT_TYPE_ID 
+           HAVING SUM( LVL_ONE_MTRC_ORIG_AMT) =0 
+  )  F_OCC, 
+RRMETADATA.RR_CONFIGURED_QMEMO, 
+  RREPORTING.RR_FRS_BU_HIER, 
+  (SELECT  con.FRS_BU FRS_BU, con.LVL_ONE_MTRC_ID LVL_ONE_MTRC_ID, 
+  con.CONTRACT_TYPE_ID 
+FROM  RREPORTING.RR_MTRC_VALUE_LVL_ONE_CON con 
+WHERE   (con.DATA_SET_ID in (select data_set_id from (SELECT con.DATA_SET_ID, 
+        RANK() OVER (ORDER BY MAX(UPDATED_AT) DESC ) -1 AS CYCLE 
+      FROM RREPORTING.RR_MTRC_VALUE_LVL_ONE_CON con 
+  INNER JOIN 
+Temp_DS 
+ ON SUBSTR(con.DATA_SET_ID,1,Temp_DS.LEN) = Temp_DS.DATA_SET_ID 
+      WHERE CONTRACT_TYPE_ID in (SELECT CONTRACT_TYPE_ID 
+                                FROM RRMETADATA.RR_CONTRACT_TYPE 
+                             WHERE RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_DESCRIPTION in  ('Cash & Due')) 
+      GROUP BY con.DATA_SET_ID) where cycle =0) 
+       and  CONTRACT_TYPE_ID in (SELECT CONTRACT_TYPE_ID 
+                                FROM RRMETADATA.RR_CONTRACT_TYPE 
+                           WHERE RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_DESCRIPTION in  ('Cash & Due'))  )) CTTL, 
+   
+(SELECT  con.FRS_BU FRS_BU, con.LVL_ONE_MTRC_ID LVL_ONE_MTRC_ID, 
+  con.CONTRACT_TYPE_ID,a12.last_cyc 
+FROM  RREPORTING.RR_MTRC_VALUE_LVL_ONE_CON con 
+join 
+(select data_set_id ,last_cyc from (SELECT con.DATA_SET_ID, 
+        RANK() OVER (ORDER BY MAX(UPDATED_AT) asc ) -1 AS CYCLE,RANK() OVER (ORDER BY MAX(UPDATED_AT) desc ) -1 AS last_cyc 
+      FROM RREPORTING.RR_MTRC_VALUE_LVL_ONE_CON con 
+  INNER JOIN 
+Temp_DS 
+ON SUBSTR(con.DATA_SET_ID,1,Temp_DS.LEN) = Temp_DS.DATA_SET_ID 
+      WHERE CONTRACT_TYPE_ID in (SELECT CONTRACT_TYPE_ID 
+                                FROM RRMETADATA.RR_CONTRACT_TYPE 
+                            WHERE RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_DESCRIPTION in  ('Cash & Due')) 
+      GROUP BY con.DATA_SET_ID) where cycle =0) a12 on  con.data_set_id = a12.data_set_id 
+      where   con.CONTRACT_TYPE_ID in (SELECT CONTRACT_TYPE_ID 
+                                FROM RRMETADATA.RR_CONTRACT_TYPE 
+                            WHERE RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_DESCRIPTION in  ('Cash & Due')))   last_cyc,	
+(SELECT  con.FRS_BU FRS_BU, con.LVL_ONE_MTRC_ID LVL_ONE_MTRC_ID, 
+  con.CONTRACT_TYPE_ID, max(ROUND(abs(LVL_ONE_MTRC_ORIG_AMT))) max_orig_amt 
+FROM  RREPORTING.RR_MTRC_VALUE_LVL_ONE_CON con 
+INNER JOIN 
+Temp_DS 
+ON SUBSTR(con.DATA_SET_ID,1,Temp_DS.LEN) = Temp_DS.DATA_SET_ID 
+WHERE CONTRACT_TYPE_ID in (SELECT CONTRACT_TYPE_ID 
+                                FROM RRMETADATA.RR_CONTRACT_TYPE 
+                             WHERE RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_DESCRIPTION in  ('Cash & Due')) 
+group by con.FRS_BU , con.LVL_ONE_MTRC_ID ,con.CONTRACT_TYPE_ID 
+) Bal 
+WHERE 
+(RR_SEC_BU_OPR_AL1.BUSINESS_UNIT=RR_FRS_BUSINESS_UNIT_SY.BUSINESS_UNIT) 
+AND  (  Bal.CONTRACT_TYPE_ID(+) = ALL_CYC.CONTRACT_TYPE_ID 
+AND Bal.LVL_ONE_MTRC_ID(+) = ALL_CYC.LVL_ONE_MTRC_ID 
+AND  Bal.FRS_BU(+) = ALL_CYC.FRS_BU  
+) 
+AND  (  last_cyc.CONTRACT_TYPE_ID(+) = ALL_CYC.CONTRACT_TYPE_ID 
+AND last_cyc.LVL_ONE_MTRC_ID(+) = ALL_CYC.LVL_ONE_MTRC_ID 
+AND  last_cyc.FRS_BU(+) = ALL_CYC.FRS_BU  ) 
+AND  (  CTTL.CONTRACT_TYPE_ID(+) = ALL_CYC.CONTRACT_TYPE_ID 
+AND CTTL.LVL_ONE_MTRC_ID(+) = ALL_CYC.LVL_ONE_MTRC_ID 
+AND  CTTL.FRS_BU(+) = ALL_CYC.FRS_BU  ) 
+AND  (  F_OCC.CONTRACT_TYPE_ID(+) = ALL_CYC.CONTRACT_TYPE_ID 
+AND F_OCC.LVL_ONE_MTRC_ID(+) = ALL_CYC.LVL_ONE_MTRC_ID 
+AND  F_OCC.FRS_BU(+) = ALL_CYC.FRS_BU  ) 
+AND  ( RRMETADATA.RR_CONTRACT_TYPE.CONTRACT_TYPE_ID= ALL_CYC.CONTRACT_TYPE_ID  ) 
+  AND  ( RREPORTING.RR_FRS_BU_HIER.BUSINESS_UNIT=ALL_CYC.FRS_BU  ) 
+  and  RREPORTING.RR_FRS_BU_HIER.BUSINESS_UNIT  =  RR_SEC_BU_OPR_AL1.BUSINESS_UNIT 
+  AND  (  ALL_CYC.LVL_ONE_MTRC_ID=RR_CONFIGURED_QMEMO.QMEMO_ACCOUNT_NUMBER 
+AND ALL_CYC.CONTRACT_TYPE_ID=RR_CONFIGURED_QMEMO.CONTRACT_TYPE_ID   ) 
+  and RR_SEC_BU_OPR_AL1.OPRID like  'ND81042'      ) 
+group by product,dataset_id,qm_account,QM_NONQM,BU,cycle,CPPP_IND,DESCRIPTION, 
+LEGAL_DOMICILE,TSY_REGION,LVID,cycle1,last_cyc 
+.. Error in Process method of Component: QueryEngineServer, Project Finance Dashboard, Job 19064, Error Code= -2147212544.)
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
